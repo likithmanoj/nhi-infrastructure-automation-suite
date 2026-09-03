@@ -35,6 +35,23 @@ def partition_actions(actions):
 
     return discovery_actions, scoped_actions
 
+def scope_resource(resource, placeholder: str):
+    if isinstance(resource, str):
+        if resource.strip() == "*":
+            return placeholder
+        return resource
+
+    if isinstance(resource, list):
+        scoped_list = []
+        for r in resource:
+            if isinstance(r, str) and r.strip() == "*":
+                scoped_list.append(placeholder)
+            else:
+                scoped_list.append(r)
+        return scoped_list
+
+    return resource
+
 
 def split_policy_statement(
     policy_doc: dict,
@@ -57,15 +74,15 @@ def split_policy_statement(
 
     new_statements = []
 
-    for statment in statements:
-        if not isinstance(statment, dict):
+    for idx, statement in enumerate(statements,start=1):
+        if not isinstance(statement, dict):
             continue
 
-        if statment.get("Effect") != "Allow" or not analyze_resource(statment.get("Resource")):
-            new_statements.append(statment)
+        if statement.get("Effect") != "Allow" or not analyze_resource(statement.get("Resource")):
+            new_statements.append(statement)
         else:
-            discovery, scoped = partition_actions(statment.get("Action"))
-            base_sid = statment.get("Sid", "Statement")
+            discovery, scoped = partition_actions(statement.get("Action"))
+            base_sid = statement.get("Sid", f"Statement{idx}")
 
             if len(discovery) > 0 and len(scoped) > 0:
                 discovery_statment = {
@@ -78,12 +95,12 @@ def split_policy_statement(
                     "Sid": base_sid + "Scoped",
                     "Effect": "Allow",
                     "Action": scoped,
-                    "Resource": target_arn_placeholder,
+                    "Resource": scope_resource(statement.get("Resource"), target_arn_placeholder),
                 }
 
-                if "Condition" in statment:
-                    discovery_statment["Condition"] = statment["Condition"]
-                    scoped_statment["Condition"] = statment["Condition"]
+                if "Condition" in statement:
+                    discovery_statment["Condition"] = statement["Condition"]
+                    scoped_statment["Condition"] = statement["Condition"]
 
                 new_statements.append(discovery_statment)
                 new_statements.append(scoped_statment)
@@ -93,15 +110,15 @@ def split_policy_statement(
                     "Sid": base_sid,
                     "Effect": "Allow",
                     "Action": scoped,
-                    "Resource": target_arn_placeholder,
+                    "Resource": scope_resource(statement.get("Resource"), target_arn_placeholder),
                 }
-                if "Condition" in statment:
-                    scoped_statment["Condition"] = statment["Condition"]
+                if "Condition" in statement:
+                    scoped_statment["Condition"] = statement["Condition"]
 
                 new_statements.append(scoped_statment)
 
             else:
-                new_statements.append(statment)
+                new_statements.append(statement)
 
     new_policy["Statement"] = new_statements
     return new_policy
