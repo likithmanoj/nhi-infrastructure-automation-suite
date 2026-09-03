@@ -78,7 +78,7 @@ def split_policy_statement(
         if not isinstance(statement, dict):
             continue
 
-        if statement.get("Effect") != "Allow" or not analyze_resource(statement.get("Resource")):
+        if statement.get("Effect") != "Allow" or not analyze_resource(statement.get("Resource")) or ("NotAction" in statement or "NotResource" in statement):
             new_statements.append(statement)
         else:
             discovery, scoped = partition_actions(statement.get("Action"))
