@@ -1,5 +1,4 @@
-from nhi.risk.helpers import (
-    GLOBAL_NON_RESOURCE_ACTIONS,RESOURCE_SCOPED_ACTIONS, is_non_resource_action)
+from nhi.risk.helpers import is_non_resource_action
 
 
 def analyze_resource(resource) -> bool:
@@ -36,9 +35,34 @@ def partition_actions(actions):
     return discovery_actions, scoped_actions
 
 
+def scope_resource(resource, replacement_arns):
+    """
+    Replaces wildcard '*' with replacement_arns (string or list of ARNs)
+    while preserving existing sibling ARNs.
+    """
+    if isinstance(replacement_arns, str):
+        replacement_arns = [replacement_arns]
+
+    if isinstance(resource, str):
+        if resource.strip() == "*":
+            return replacement_arns if len(replacement_arns) > 1 else replacement_arns[0]
+        return resource
+
+    if isinstance(resource, list):
+        scoped_list = []
+        for r in resource:
+            if isinstance(r, str) and r.strip() == "*":
+                scoped_list.extend(replacement_arns)
+            else:
+                scoped_list.append(r)
+        return scoped_list
+
+    return resource
+
+
 def split_policy_statement(
     policy_doc: dict,
-    target_arn_placeholder: str = "arn:aws:*:*:*:placeholder/*",
+    target_arns: list[str] | str = "arn:aws:*:*:*:placeholder/*",
 ) -> dict:
     if not isinstance(policy_doc, dict):
         return {}
@@ -57,51 +81,67 @@ def split_policy_statement(
 
     new_statements = []
 
-    for statment in statements:
-        if not isinstance(statment, dict):
+    for idx, statement in enumerate(statements, start=1):
+        if not isinstance(statement, dict):
             continue
 
-        if statment.get("Effect") != "Allow" or not analyze_resource(statment.get("Resource")):
-            new_statements.append(statment)
+        if (
+            statement.get("Effect") != "Allow"
+            or not analyze_resource(statement.get("Resource"))
+            or ("NotAction" in statement or "NotResource" in statement)
+        ):
+            new_statements.append(statement)
+            continue
+
+        discovery, scoped = partition_actions(statement.get("Action"))
+        base_sid = statement.get("Sid", f"Statement{idx}")
+
+        if len(discovery) > 0 and len(scoped) > 0:
+            discovery_statement = {
+                "Sid": f"{base_sid}Discovery",
+                "Effect": "Allow",
+                "Action": discovery,
+                "Resource": "*",
+            }
+            scoped_statement = {
+                "Sid": f"{base_sid}Scoped",
+                "Effect": "Allow",
+                "Action": scoped,
+                "Resource": scope_resource(statement.get("Resource"), target_arns),
+            }
+
+            if "Condition" in statement:
+                discovery_statement["Condition"] = statement["Condition"]
+                scoped_statement["Condition"] = statement["Condition"]
+
+            new_statements.append(discovery_statement)
+            new_statements.append(scoped_statement)
+
+        elif len(scoped) > 0 and len(discovery) == 0:
+            scoped_statement = {
+                "Sid": f"{base_sid}Scoped" if statement.get("Sid") else base_sid,
+                "Effect": "Allow",
+                "Action": scoped,
+                "Resource": scope_resource(statement.get("Resource"), target_arns),
+            }
+            if "Condition" in statement:
+                scoped_statement["Condition"] = statement["Condition"]
+
+            new_statements.append(scoped_statement)
+
+        elif len(discovery) > 0 and len(scoped) == 0:
+            discovery_statement = {
+                "Sid": f"{base_sid}Discovery" if statement.get("Sid") else base_sid,
+                "Effect": "Allow",
+                "Action": discovery,
+                "Resource": "*",
+            }
+            if "Condition" in statement:
+                discovery_statement["Condition"] = statement["Condition"]
+
+            new_statements.append(discovery_statement)        
         else:
-            discovery, scoped = partition_actions(statment.get("Action"))
-            base_sid = statment.get("Sid", "Statement")
-
-            if len(discovery) > 0 and len(scoped) > 0:
-                discovery_statment = {
-                    "Sid": base_sid + "Discovery",
-                    "Effect": "Allow",
-                    "Action": discovery,
-                    "Resource": "*",
-                }
-                scoped_statment = {
-                    "Sid": base_sid + "Scoped",
-                    "Effect": "Allow",
-                    "Action": scoped,
-                    "Resource": target_arn_placeholder,
-                }
-
-                if "Condition" in statment:
-                    discovery_statment["Condition"] = statment["Condition"]
-                    scoped_statment["Condition"] = statment["Condition"]
-
-                new_statements.append(discovery_statment)
-                new_statements.append(scoped_statment)
-
-            elif len(scoped) > 0 and len(discovery) == 0:
-                scoped_statment = {
-                    "Sid": base_sid,
-                    "Effect": "Allow",
-                    "Action": scoped,
-                    "Resource": target_arn_placeholder,
-                }
-                if "Condition" in statment:
-                    scoped_statment["Condition"] = statment["Condition"]
-
-                new_statements.append(scoped_statment)
-
-            else:
-                new_statements.append(statment)
+            new_statements.append(statement)
 
     new_policy["Statement"] = new_statements
     return new_policy
