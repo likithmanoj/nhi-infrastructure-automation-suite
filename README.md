@@ -1,6 +1,10 @@
-# NHI Risk Analyzer for AWS
+# NHI Risk Analyzer and Remediator for AWS
 
 An offline-first security automation platform that discovers, inventories, analyzes, risk-assesses, and safely remediates **Non-Human Identities (NHIs)** — IAM users, groups, roles, and associated policies — across AWS environments.
+
+> ⭐️ **If you find this tool helpful for auditing and securing AWS Non-Human Identities, please consider starring the repository!**
+
+---
 
 ---
 
@@ -60,7 +64,7 @@ NHI Risk Analyzer automates discovery, security analysis, and targeted remediati
 
 1. **State Collection (`nhi/services/inventory.py`):** Queries AWS IAM APIs via Boto3, enriches user access key metadata with `GetAccessKeyLastUsed` details, and serializes a clean state snapshot to `inventory.json`.
 2. **Offline Evaluation (`nhi/risk/risk.py`):** Loads `inventory.json` locally and passes resource payloads through modular security rules inside `nhi/risk/rules/`.
-3. **Artifact Export (`nhi/services/export.py`):** Uploads `inventory.json` and security findings to an S3 bucket provisioned by Terraform.
+3. **Artifact Export & Run-over-Run Diffing (`nhi/services/export.py`, `nhi/remediation/diff.py`):** Calculates security drift against historical baseline scans, uploads execution artifacts to S3, and optionally exports findings to CSV for spreadsheet auditing.
 4. **Remediation Dispatcher (`nhi/remediation/dispatch.py`):** Routes actionable findings through safe containment handlers with fail-closed safety, dry-run simulation mode, and exemption filtering via `nhi-ignore.yaml`.
 
 ---
@@ -250,8 +254,9 @@ The architecture decouples offline rule evaluation from remediation dispatching,
   * Permissions Boundary containment for privilege escalation and policy over-privilege (`nhi/remediation/handlers/policy.py`)
   * Non-destructive access key deactivation (`nhi/remediation/handlers/credential.py`)
   * Dispatch pipeline with `dry_run` simulation and `nhi-ignore.yaml` exemptions (`nhi/remediation/dispatch.py`)
-  * Terraform permissions boundary provisioning and canary suite (`terraform/main.tf`, `terraform/canary.tf`)
-  * 100% offline unit test suite with `pytest` (`tests/test_remediation.py`)
+  * Run-over-run diffing engine with S3-backed state persistence (`nhi/remediation/diff.py`)
+  * Standalone CLI packaging via `pyproject.toml` (`nhi` command) with custom `--csv` report exports
+  * 100% offline unit test suite with `pytest` (`tests/test_remediation.py`, `tests/test_diff.py`)
 
 ---
 
@@ -380,51 +385,33 @@ The scanner execution role requires the following minimal IAM policy to inventor
 nhi-risk-analyzer/
 ├── nhi/
 │   ├── aws/                       # Boto3 wrappers & session management
-│   │   ├── iam.py                 # IAM API helpers (get_access_key_last_used, set_*_boundary, update_key)
-│   │   ├── s3.py                  # S3 upload utilities
+│   │   ├── iam.py                 # IAM API helpers
+│   │   ├── s3.py                  # S3 upload & retrieval utilities
 │   │   └── session.py             # Cached AWS session initialization
-│   ├── risk/
-│   │   ├── risk.py                # Core risk engine runner & CLI interface
-│   │   ├── helpers.py             # Shared evaluation helpers (classification, action matching)
-│   │   └── rules/                 # Modular evaluation rules
-│   │       ├── wildcards.py       # IAM_01, IAM_02, IAM_03
-│   │       ├── privilege_escalation.py # IAM_04–IAM_09 (Rhino-based escalation paths)
-│   │       ├── trust_policy.py    # IAM_10 (Public trust policies)
-│   │       ├── credentials.py     # IAM_11, IAM_12 (Stale and dormant keys)
-│   │       ├── data_perimeter.py  # IAM_14, IAM_16 (S3 exfiltration & KMS decrypt)
-│   │       ├── resource_protection.py # IAM_15 (Defense evasion)
-│   │       └── tags.py            # TAG_01 (Mandatory tags)
-│   ├── remediation/               # Automated remediation engine
+│   ├── remediation/               # Automated remediation & diffing engine
 │   │   ├── dispatch.py            # Handler routing & stats collection
-│   │   ├── config.py              # Exemption parser (nhi-ignore.yaml)
-│   │   └── handlers/
-│   │       ├── policy.py          # Boundary attachment handler
-│   │       ├── credential.py      # Key deactivation handler
-│   │       └── tags.py            # Tag remediation handler
-│   ├── services/
-│   │   ├── inventory.py           # State collection & key enrichment
-│   │   └── export.py              # Output export handlers
+│   │   ├── diff.py                # Posture drift & diffing logic
+│   │   ├── config.py              # Exemption parser for nhi-ignore.yaml
+│   │   └── handlers/              # Boundary & deactivation logic
+│   ├── risk/                      # Core evaluation logic
+│   │   ├── risk.py                # Main CLI runner & entry point
+│   │   ├── helpers.py             # Classification utilities
+│   │   └── rules/                 # IAM risk detection modules
+│   ├── services/                  
+│   │   ├── export.py              # JSON and CSV output handlers
+│   │   └── inventory.py           # State collection via Boto3
 │   └── config.py                  # Global threshold configurations
-├── terraform/                      # Infrastructure as Code for runner & S3 bucket
-│   ├── main.tf                    # Runner IAM user/role, S3 bucket, boundary policy
-│   ├── canary.tf                  # Validation canaries for live test suite (IAM_01–IAM_16, TAG_01)
-│   ├── outputs.tf                 # Terraform outputs
-│   └── remote_state.tf             # Terraform state backend bucket
-├── tests/                         # Automated unit test suite (pytest)
-│   ├── test_credentials.py         # Rule unit tests for IAM_11 / IAM_12
-│   ├── test_data_perimeter.py     # Rule unit tests for IAM_14 / IAM_16
-│   ├── test_inventory.py          # Mock-injected inventory tests
-│   ├── test_policy_surgery.py     # Policy parsing & AST unit tests
-│   ├── test_privilege_escalation.py # Privilege escalation & resource classifier tests (IAM_04–IAM_09)
-│   ├── test_remediation.py        # Mock-injected remediation engine tests
-│   ├── test_remediation_credentials.py # Credential dispatch flow tests
-│   ├── test_resource_protection.py# Defense evasion rule unit tests (IAM_15)
-│   └── test_trust_policy.py       # Permissive trust policy unit tests (IAM_10)
-├── nhi-ignore.yaml                 # Exemption configuration file
-├── pytest.ini                     # Pytest configuration (pythonpath = .)
-├── admin.sh                        # Admin credentials bootstrap (gitignored)
-├── runner.sh                       # Dynamic runner credential export (gitignored)
-└── README.md
+├── terraform/                     # Infrastructure as Code for scanner & S3
+├── tests/                         # Pytest unit testing suite
+├── .gitignore                     # Untracked files configuration
+├── admin.sh                       # Local admin bootstrap (gitignored)
+├── automation_test.py             # Local testing and automation script
+├── license.md                     # AGPLv3 License
+├── nhi-ignore.yaml                # Remediation exemption list
+├── pyproject.toml                 # Package configuration & CLI entry point
+├── pytest.ini                     # Pytest environment config
+├── README.md                      # Project documentation
+└── runner.sh                      # Local session setup script (gitignored)
 ```
 
 ---
@@ -445,7 +432,9 @@ cd nhi-risk-analyzer
 
 python3 -m venv .venv
 source .venv/bin/activate
-pip install boto3 pytest pyyaml
+
+# Install dependencies and package CLI in editable mode
+pip install -e .
 ```
 
 ### 2. Bootstrap the Remote State Backend (first-time setup only)
@@ -531,14 +520,20 @@ The execution engine provides three distinct run modes via CLI flags:
 # Source dynamically generated runner credentials and boundary ARN
 source runner.sh
 
-# 1. Pure Scan Mode (Inventory & Rule Evaluation only - zero mutations)
-python -m nhi.risk.risk
+# 1. Pure Scan & Run-over-Run Diff (Calculates posture drift and persists snapshot to S3)
+nhi
 
-# 2. Dry-Run Simulation Mode (Simulates remediation and checks nhi-ignore.yaml exemptions)
-python -m nhi.risk.risk --dry-run
+# 2. Export Findings to CSV for spreadsheet review and auditing
+nhi --csv findings.csv
 
-# 3. Live Containment Mode (Attaches Permissions Boundaries & deactivates stale keys)
-python -m nhi.risk.risk --remediate
+# 3. Dry-Run Simulation Mode (Simulates containment and checks nhi-ignore.yaml exemptions)
+nhi --dry-run
+
+# 4. Dry-Run with CSV export in one command
+nhi --dry-run --csv simulation_report.csv
+
+# 5. Live Containment Mode (Attaches Permissions Boundaries & deactivates stale keys)
+nhi --remediate
 ```
 
 ---
