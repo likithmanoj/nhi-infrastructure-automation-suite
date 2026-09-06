@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nhi-risk-analyzer"
+version = "0.1.0"
+description = "AWS Non-Human Identity Risk Analyzer & Policy Surgery Engine"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "boto3>=1.28.0",
+    "botocore>=1.31.0",
+    "pytest>=8.0.0",
+]
+
+[project.scripts]
+nhi = "nhi.risk.risk:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["nhi*"]

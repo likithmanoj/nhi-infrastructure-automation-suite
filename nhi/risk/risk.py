@@ -25,7 +25,10 @@ from nhi.risk.rules.resource_protection import (
 )
 from nhi.remediation.dispatch import dispatch_remediation
 from nhi.risk.rules.tags import analyze_mandatory_tags # TAG_01 (Missing mandatory tags)
-from nhi.risk.rules.trust_policy import analyze_trust_policy # IAM_10 (Permissive trust policies)
+from nhi.risk.rules.trust_policy import analyze_trust_policy # IAM_10 (Permissive trust policies
+from datetime import datetime, timezone
+from nhi.aws.s3 import fetch_latest_scan, persist_scan_artifact
+from nhi.remediation.diff import diff_findings
 
 def run_privilege_escalation_checks(policies, identity_type, identity_name):
     """Sub-runner to execute all privilege escalation rules against a policy list."""
@@ -119,9 +122,11 @@ def enrich_findings_for_aws_managed_policies(findings):
 def is_aws_managed_policy(policy_arn) -> bool:
     return bool(policy_arn and policy_arn.startswith("arn:aws:iam::aws:policy/"))
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="NHI Risk Analyzer & Remediation Engine for AWS")
-    
+def main():
+    parser = argparse.ArgumentParser(
+        description="NHI Risk Analyzer & Remediation Engine for AWS"
+    )
+
     group = parser.add_mutually_exclusive_group()
     group.add_argument(
         "--dry-run",
@@ -133,12 +138,29 @@ if __name__ == "__main__":
         action="store_true",
         help="Execute live remediation against detected findings",
     )
-    
+
     args = parser.parse_args()
 
     print("[*] Running inventory and risk evaluation...")
     all_findings = analyze_inventory()
-    print(f"[*] Findings detected: {len(all_findings)}")   
+    print(f"[*] Total current findings detected: {len(all_findings)}")
+
+    print("[*] Fetching previous scan artifact from S3 for run-over-run diffing...")
+    previous_scan = fetch_latest_scan()
+    previous_findings = previous_scan.get("findings", []) if previous_scan else []
+
+    diff_result = diff_findings(previous_findings, all_findings)
+    summary = diff_result["summary"]
+
+    print(f"\n{'='*40}")
+    print("           RUN-OVER-RUN DIFF            ")
+    print(f"{'='*40}")
+    print(f" [+] New Findings:        {summary['new_count']}")
+    print(f" [-] Resolved Findings:   {summary['resolved_count']}")
+    print(f" [=] Unresolved Findings: {summary['unresolved_count']}")
+    print(f"{'='*40}\n")
+
+    stats = None
     if args.remediate:
         print("[!] Executing LIVE remediation...")
         stats = dispatch_remediation(all_findings, dry_run=False)
@@ -148,4 +170,20 @@ if __name__ == "__main__":
         stats = dispatch_remediation(all_findings, dry_run=True)
         print("Dry Run Stats:", stats)
     else:
-        print("[*] Scan complete. (Pass --dry-run to simulate containment or --remediate to execute live)")
+        print(
+            "[*] Scan complete. (Pass --dry-run to simulate containment or --remediate to execute live)"
+        )
+
+    artifact = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "summary": summary,
+        "diff": diff_result,
+        "findings": all_findings,
+        "remediation_stats": stats,
+    }
+    print("[*] Persisting scan artifact to S3...")
+    persist_scan_artifact(artifact)
+
+
+if __name__ == "__main__":
+    main()
