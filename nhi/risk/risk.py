@@ -29,6 +29,7 @@ from nhi.risk.rules.trust_policy import analyze_trust_policy # IAM_10 (Permissiv
 from datetime import datetime, timezone
 from nhi.aws.s3 import fetch_latest_scan, persist_scan_artifact
 from nhi.remediation.diff import diff_findings
+from nhi.services.export import export_findings_to_csv
 
 def run_privilege_escalation_checks(policies, identity_type, identity_name):
     """Sub-runner to execute all privilege escalation rules against a policy list."""
@@ -138,12 +139,21 @@ def main():
         action="store_true",
         help="Execute live remediation against detected findings",
     )
+    parser.add_argument(
+    "--csv",
+    type=str,
+    metavar="FILEPATH",
+    help="Export detected findings to a CSV file at the specified path",
+)
 
     args = parser.parse_args()
 
     print("[*] Running inventory and risk evaluation...")
     all_findings = analyze_inventory()
     print(f"[*] Total current findings detected: {len(all_findings)}")
+
+    if args.csv:
+        export_findings_to_csv(all_findings, args.csv)
 
     print("[*] Fetching previous scan artifact from S3 for run-over-run diffing...")
     previous_scan = fetch_latest_scan()

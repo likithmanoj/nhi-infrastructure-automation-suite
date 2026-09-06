@@ -45,3 +45,11 @@ inventory.json
 tests.pyproduction.log
 production.log
 production.log
+# Build & packaging artifacts
+*.egg-info/
+build/
+dist/
+*.egg
+
+# Test & local export outputs
+*.csv
