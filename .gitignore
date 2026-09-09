@@ -53,3 +53,4 @@ dist/
 
 # Test & local export outputs
 *.csv
+.sarif
