@@ -17,8 +17,11 @@ data "aws_iam_policy_document" "oidc" {
       variable = "token.actions.githubusercontent.com:aud"
     }
     condition {
-      test     = "StringLike"
-      values   = ["repo:likithmanoj/nhi-risk-analyzer:*"] #Note to the users: Add your own Repo here for running the repo with OIDC for Github actions
+      test = "StringLike"
+      values = [
+        "repo:likithmanoj/nhi-risk-analyzer:*",
+        "repo:likithmanoj@*/nhi-risk-analyzer@*:*"
+      ] # Supports both standard and GitHub immutable ID formats
       variable = "token.actions.githubusercontent.com:sub"
     }
   }
