@@ -27,7 +27,6 @@ def build_sarif_result(finding: dict) -> dict:
     severity = finding.get("Severity", "warning")
     level = map_severity_to_sarif_level(severity)
 
-    # Prefer detailed finding description, fall back to Title
     message_text = (
         finding.get("Title")
         or finding.get("Finding")
@@ -46,14 +45,23 @@ def build_sarif_result(finding: dict) -> dict:
         },
         "locations": [
             {
+                "physicalLocation": {
+                    "artifactLocation": {
+                        "uri": "terraform/main.tf",
+                    },
+                    "region": {
+                        "startLine": 1,
+                    },
+                },
                 "logicalLocations": [
                     {
                         "name": identity_name,
                         "kind": identity_type,
                     }
-                ]
+                ],
             }
         ],
+
     }
 
     return result

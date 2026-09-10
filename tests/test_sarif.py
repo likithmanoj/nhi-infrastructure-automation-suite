@@ -48,6 +48,10 @@ def test_build_sarif_result():
     assert "(Target: Role/deployer-role, Resource: *)" in result["message"]["text"]
     assert result["locations"][0]["logicalLocations"][0]["name"] == "deployer-role"
     assert result["locations"][0]["logicalLocations"][0]["kind"] == "Role"
+    assert (
+        result["locations"][0]["physicalLocation"]["artifactLocation"]["uri"]
+        == "terraform/main.tf"
+    )
 
 
 def test_build_sarif_rules_deduplication():
