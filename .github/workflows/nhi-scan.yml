@@ -38,6 +38,9 @@ jobs:
           pip install -e .
 
       - name: Run NHI Scan
+        env:
+          # Optional: Specify your S3 bucket name for adding the findings file via Github actions
+          BUCKET_NAME: pam-infrastructure-automation-suite-dev-bucket
         run: |
           nhi --sarif results.sarif
 

@@ -6,6 +6,9 @@ from nhi.config import BUCKET_NAME
 
 
 def upload_file(file_name: str) -> None:
+    if not BUCKET_NAME:
+        print("[*] No S3 BUCKET_NAME configured; skipping file upload.")
+        return
     session = get_session()
     s3_client = session.client("s3")
     try:
@@ -17,6 +20,9 @@ def upload_file(file_name: str) -> None:
 
 def persist_scan_artifact(scan_data: dict, prefix: str = "scans/") -> str | None:
     """Persists a complete scan artifact dictionary directly to S3 as JSON."""
+    if not BUCKET_NAME:
+        print("[*] No S3 BUCKET_NAME configured; skipping scan artifact persistence.")
+        return None
     session = get_session()
     s3_client = session.client("s3")
 
@@ -39,6 +45,9 @@ def persist_scan_artifact(scan_data: dict, prefix: str = "scans/") -> str | None
 
 def fetch_latest_scan(prefix: str = "scans/") -> dict | None:
     """Finds and downloads the most recently modified scan artifact from S3."""
+    if not BUCKET_NAME:
+        print("[*] No S3 BUCKET_NAME configured; skipping previous scan retrieval.")
+        return None
     session = get_session()
     s3_client = session.client("s3")
     clean_prefix = prefix.rstrip("/") + "/"
