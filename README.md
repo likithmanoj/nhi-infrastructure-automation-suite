@@ -255,8 +255,8 @@ The architecture decouples offline rule evaluation from remediation dispatching,
   * Non-destructive access key deactivation (`nhi/remediation/handlers/credential.py`)
   * Dispatch pipeline with `dry_run` simulation and `nhi-ignore.yaml` exemptions (`nhi/remediation/dispatch.py`)
   * Run-over-run diffing engine with S3-backed state persistence (`nhi/remediation/diff.py`)
-  * Standalone CLI packaging via `pyproject.toml` (`nhi` command) with custom `--csv` report exports
-  * 100% offline unit test suite with `pytest` (`tests/test_remediation.py`, `tests/test_diff.py`)
+  * Standalone CLI packaging via `pyproject.toml` (`nhi` command) with custom `--csv` and OASIS SARIF v2.1.0 (`--sarif`) report exports
+  * 100% offline unit test suite with `pytest` (`tests/test_remediation.py`, `tests/test_diff.py`, `tests/test_sarif.py`)
 
 ---
 
@@ -399,7 +399,8 @@ nhi-risk-analyzer/
 │   │   └── rules/                 # IAM risk detection modules
 │   ├── services/                  
 │   │   ├── export.py              # JSON and CSV output handlers
-│   │   └── inventory.py           # State collection via Boto3
+│   │   ├── inventory.py           # State collection via Boto3
+│   │   └── sarif.py               # OASIS SARIF v2.1.0 report generator
 │   └── config.py                  # Global threshold configurations
 ├── terraform/                     # Infrastructure as Code for scanner & S3
 ├── tests/                         # Pytest unit testing suite
@@ -532,7 +533,13 @@ nhi --dry-run
 # 4. Dry-Run with CSV export in one command
 nhi --dry-run --csv simulation_report.csv
 
-# 5. Live Containment Mode (Attaches Permissions Boundaries & deactivates stale keys)
+# 5. Export findings to OASIS SARIF v2.1.0 for GitHub Code Scanning / CI/CD
+nhi --sarif results.sarif
+
+# 6. Combined Dry-Run simulation with SARIF export
+nhi --dry-run --sarif security-scan.sarif
+
+# 7. Live Containment Mode (Attaches Permissions Boundaries & deactivates stale keys)
 nhi --remediate
 ```
 

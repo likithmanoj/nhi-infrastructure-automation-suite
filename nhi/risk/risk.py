@@ -30,6 +30,7 @@ from datetime import datetime, timezone
 from nhi.aws.s3 import fetch_latest_scan, persist_scan_artifact
 from nhi.remediation.diff import diff_findings
 from nhi.services.export import export_findings_to_csv
+from nhi.services.sarif import export_findings_to_sarif
 
 def run_privilege_escalation_checks(policies, identity_type, identity_name):
     """Sub-runner to execute all privilege escalation rules against a policy list."""
@@ -145,6 +146,12 @@ def main():
     metavar="FILEPATH",
     help="Export detected findings to a CSV file at the specified path",
 )
+    parser.add_argument(
+    "--sarif",
+    type=str,
+    metavar="FILEPATH",
+    help="Export detected findings to SARIF",
+)
 
     args = parser.parse_args()
 
@@ -154,6 +161,10 @@ def main():
 
     if args.csv:
         export_findings_to_csv(all_findings, args.csv)
+    
+    if args.sarif:
+        export_findings_to_sarif(all_findings, args.sarif)
+
 
     print("[*] Fetching previous scan artifact from S3 for run-over-run diffing...")
     previous_scan = fetch_latest_scan()
