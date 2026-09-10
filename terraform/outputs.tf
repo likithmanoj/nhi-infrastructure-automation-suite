@@ -20,3 +20,7 @@ output "permissions_boundary_policy_arn" {
   description = "ARN of the NHI Permissions Boundary policy"
   value       = aws_iam_policy.permissions_boundary_policy.arn
 }
+output "oidc_role_arn" {
+  description = "ARN of Oidc role"
+  value       = aws_iam_role.oidc-role.arn
+}

@@ -383,11 +383,14 @@ The scanner execution role requires the following minimal IAM policy to inventor
 
 ```text
 nhi-risk-analyzer/
+├── .github/
+│   └── workflows/
+│       └── nhi-scan.yml           # Automated CI/CD security scan via AWS OIDC & SARIF
 ├── nhi/
 │   ├── aws/                       # Boto3 wrappers & session management
 │   │   ├── iam.py                 # IAM API helpers
 │   │   ├── s3.py                  # S3 upload & retrieval utilities
-│   │   └── session.py             # Cached AWS session initialization
+│   │   └── session.py             # Dual-mode (OIDC ambient + STS assume) session logic
 │   ├── remediation/               # Automated remediation & diffing engine
 │   │   ├── dispatch.py            # Handler routing & stats collection
 │   │   ├── diff.py                # Posture drift & diffing logic
@@ -402,7 +405,12 @@ nhi-risk-analyzer/
 │   │   ├── inventory.py           # State collection via Boto3
 │   │   └── sarif.py               # OASIS SARIF v2.1.0 report generator
 │   └── config.py                  # Global threshold configurations
-├── terraform/                     # Infrastructure as Code for scanner & S3
+├── terraform/                     # Infrastructure as Code
+│   ├── oidc.tf                    # AWS OIDC Provider & GitHub Actions IAM role
+│   ├── main.tf                    # Runner role, baseline policies, boundary definition
+│   ├── outputs.tf                 # Exported ARNs (including oidc_role_arn)
+│   ├── canary.tf                  # Canary IAM entities for detection validation
+│   └── remote_state.tf            # S3 remote backend & state locking
 ├── tests/                         # Pytest unit testing suite
 ├── .gitignore                     # Untracked files configuration
 ├── admin.sh                       # Local admin bootstrap (gitignored)
@@ -542,6 +550,140 @@ nhi --dry-run --sarif security-scan.sarif
 # 7. Live Containment Mode (Attaches Permissions Boundaries & deactivates stale keys)
 nhi --remediate
 ```
+
+---
+
+## 🚀 CI/CD & GitHub Actions Integration (Keyless via AWS OIDC)
+
+`nhi-risk-analyzer` runs natively inside GitHub Actions with **zero long-lived AWS access keys** by combining **AWS OpenID Connect (OIDC)** identity federation with **OASIS SARIF v2.1.0** security reporting.
+
+```text
+  ┌──────────────────────┐         ┌────────────────────┐         ┌────────────────────┐
+  │  GitHub Actions CI   │  OIDC   │   AWS STS Service  │ Assume  │   NHI Assessment   │
+  │  (.github/workflows) │ ──────> │  (Trust Policy)    │ ──────> │   (OIDC-Assumed    │
+  │  Mints Signed JWT    │         │  Validates Claims  │  Role   │    Permissions)    │
+  └──────────────────────┘         └────────────────────┘         └────────────────────┘
+             │                                                               │
+             │                                                               │
+             ▼                                                               ▼
+  ┌──────────────────────┐         ┌────────────────────┐         ┌────────────────────┐
+  │ GitHub Security Tab  │ <────── │ upload-sarif@v3    │ <────── │  `results.sarif`   │
+  │ Code Scanning Alerts │  SARIF  │ Ingests Findings   │ Output  │  OASIS v2.1.0 JSON │
+  └──────────────────────┘         └────────────────────┘         └────────────────────┘
+```
+
+### Step 1: Provision OIDC Trust in Your AWS Account
+Deploy the provided Terraform configuration in `terraform/oidc.tf` into your target AWS account. 
+
+In `terraform/oidc.tf`, update the `sub` claim condition to trust your own GitHub organization and repository:
+
+```hcl
+condition {
+  test     = "StringLike"
+  values   = ["repo:<YOUR_GITHUB_ORG>/<YOUR_REPO>:*"]
+  variable = "token.actions.githubusercontent.com:sub"
+}
+```
+
+Deploy the infrastructure:
+```bash
+cd terraform
+terraform init
+terraform apply
+```
+
+Terraform automatically displays the created role ARN in the outputs at the end of the apply. You can also view it at any time:
+
+* **From the repository root:**
+  ```bash
+  terraform -chdir=terraform output oidc_role_arn
+  ```
+* **From inside the `terraform/` directory:**
+  ```bash
+  terraform output oidc_role_arn
+  ```
+
+### Step 2: Configure Your GitHub Repository Variable
+Set the repository variable via the GitHub CLI (`gh`):
+
+```bash
+gh variable set AWS_ROLE_TO_ASSUME --body "arn:aws:iam::<YOUR_ACCOUNT_ID>:role/oidc-role"
+```
+
+*(Alternatively, configure it via the GitHub UI under **Settings → Secrets and variables → Actions → Variables → New repository variable**).*
+
+### Step 3: Add the GitHub Actions Workflow
+Create `.github/workflows/nhi-scan.yml` in your repository:
+
+```yaml
+name: NHI Security Scan & SARIF Export
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  id-token: write        # Required for AWS OIDC authentication
+  contents: read         # Required for actions/checkout to pull your repository
+  security-events: write # Required for GitHub Code Scanning to ingest SARIF
+
+jobs:
+  scan:
+    name: Run NHI Risk Assessment
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_TO_ASSUME }}
+          aws-region: us-east-1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+
+      - name: Run NHI Scan
+        env:
+          # Optional: Put your S3 bucket name here to save scan history & run-over-run diffs
+          BUCKET_NAME: pam-infrastructure-automation-suite-dev-bucket
+        run: |
+          nhi --sarif results.sarif
+
+      - name: Upload SARIF to GitHub Code Scanning
+        uses: github/codeql-action/upload-sarif@v4
+        if: always()
+        with:
+          sarif_file: results.sarif
+          category: nhi-risk-analyzer
+```
+
+### 💡 S3 Bucket Setup (Simple Guide)
+
+If you want GitHub Actions to store scan findings and compare results over time:
+1. Open `.github/workflows/nhi-scan.yml`.
+2. Find the **`Run NHI Scan`** step.
+3. Update `BUCKET_NAME` with your own S3 bucket name:
+   ```yaml
+   env:
+     BUCKET_NAME: your-bucket-name-here
+   ```
+4. **Don't want to use S3?** No problem! You can simply delete or comment out `BUCKET_NAME`. The scanner will still run, find all security risks, and upload them directly to GitHub Code Scanning without needing an S3 bucket.
+
+### Step 4: View Findings in GitHub Code Scanning
+Once the workflow finishes, all security alerts (Privilege Escalation, Permissive Trust Policies, Credential Hygiene, Data Perimeter breaches) appear directly inside your GitHub repository under **Security → Code scanning alerts** with full rule IDs, severity indicators, and remediation guidance.
 
 ---
 
