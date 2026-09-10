@@ -640,7 +640,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Configure AWS Credentials via OIDC
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ vars.AWS_ROLE_TO_ASSUME }}
           aws-region: us-east-1
@@ -656,16 +656,31 @@ jobs:
           pip install -e .
 
       - name: Run NHI Scan
+        env:
+          # Optional: Put your S3 bucket name here to save scan history & run-over-run diffs
+          BUCKET_NAME: pam-infrastructure-automation-suite-dev-bucket
         run: |
           nhi --sarif results.sarif
 
       - name: Upload SARIF to GitHub Code Scanning
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
           sarif_file: results.sarif
           category: nhi-risk-analyzer
 ```
+
+### 💡 S3 Bucket Setup (Simple Guide)
+
+If you want GitHub Actions to store scan findings and compare results over time:
+1. Open `.github/workflows/nhi-scan.yml`.
+2. Find the **`Run NHI Scan`** step.
+3. Update `BUCKET_NAME` with your own S3 bucket name:
+   ```yaml
+   env:
+     BUCKET_NAME: your-bucket-name-here
+   ```
+4. **Don't want to use S3?** No problem! You can simply delete or comment out `BUCKET_NAME`. The scanner will still run, find all security risks, and upload them directly to GitHub Code Scanning without needing an S3 bucket.
 
 ### Step 4: View Findings in GitHub Code Scanning
 Once the workflow finishes, all security alerts (Privilege Escalation, Permissive Trust Policies, Credential Hygiene, Data Perimeter breaches) appear directly inside your GitHub repository under **Security → Code scanning alerts** with full rule IDs, severity indicators, and remediation guidance.
