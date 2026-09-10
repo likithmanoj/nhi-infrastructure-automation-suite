@@ -18,7 +18,7 @@ data "aws_iam_policy_document" "oidc" {
     }
     condition {
       test     = "StringLike"
-      values   = ["repo:likithmanoj/nhi-risk-analyzer:*"]
+      values   = ["repo:likithmanoj/nhi-risk-analyzer:*"] #Note to the users: Add your own Repo here for running the repo with OIDC for Github actions
       variable = "token.actions.githubusercontent.com:sub"
     }
   }
